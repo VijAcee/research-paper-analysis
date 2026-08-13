@@ -30,17 +30,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
-    # SendGrid & OTP Settings
-    SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = "noreply@paperlens.ai"
-    SENDGRID_FROM_NAME: str = "PaperLens Workspace"
-    OTP_EXPIRATION_MINUTES: int = 5
-    OTP_RESEND_COOLDOWN_SECONDS: int = 60
-    MAX_OTP_ATTEMPTS: int = 5
-    MAX_OTP_RESENDS_PER_HOUR: int = 3
-
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["*"]
+    ALLOWED_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
+    ]
 
     model_config = SettingsConfigDict(
         env_file=str(env_file_path),

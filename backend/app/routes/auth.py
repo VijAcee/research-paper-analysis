@@ -24,15 +24,6 @@ from app.models.auth import (
     UserUpdateRequest,
     ChangePasswordRequest
 )
-from app.models.otp import (
-    ForgotPasswordRequest,
-    ResendOTPRequest,
-    VerifyOTPRequest,
-    ResetPasswordRequest,
-    PasswordlessLoginRequest,
-    PasswordlessVerifyRequest
-)
-from app.services.email_service import send_otp_email
 from app.services.vector_store import delete_paper_chunks
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -84,6 +75,12 @@ def register(user_in: UserRegister):
         "role": role,
         "is_verified": True,
         "password_history": [hashed_pwd],
+        "settings": {
+            "explanation_level": "Standard",
+            "analysis_length": "Detailed",
+            "language": "English",
+            "theme": "System Default"
+        },
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
@@ -246,376 +243,24 @@ def change_password(request: ChangePasswordRequest, current_user: dict = Depends
 
     return {"message": "Password updated successfully."}
 
-@router.post("/forgot-password")
-def forgot_password(request: ForgotPasswordRequest):
-    """
-    Step 1: Accepts email, checks DB, generates cryptographically secure 6-digit OTP,
-    hashes OTP with bcrypt, saves to DB, and sends SendGrid HTML email.
-    Protects against email enumeration by ALWAYS returning the same generic message.
-    """
-    db = get_db()
-    generic_msg = "If an account exists for this email, a verification code has been sent."
-    
-    user = db.users.find_one({"email": request.email})
-    if not user:
-        return {"message": generic_msg}
-    
-    # Check rate limit (max 3 resends/hour)
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-    recent_otps = db.otps.count_documents({
-        "email": request.email,
-        "created_at": {"$gte": one_hour_ago}
-    })
-    if recent_otps >= settings.MAX_OTP_RESENDS_PER_HOUR:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Maximum password reset requests exceeded. Please try again after 1 hour."
-        )
-    
-    # Invalidate previous unverified OTPs
-    db.otps.update_many(
-        {"email": request.email, "is_used": False},
-        {"$set": {"is_used": True}}
-    )
-    
-    # Cryptographically secure 6-digit OTP generator
-    otp_code = str(secrets.SystemRandom().randint(100000, 999999))
-    hashed_otp = get_password_hash(otp_code)
-    
-    expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRATION_MINUTES)
-    
-    otp_doc = {
-        "user_id": str(user["_id"]),
-        "email": request.email,
-        "hashed_otp": hashed_otp,
-        "created_at": datetime.utcnow(),
-        "expires_at": expires_at,
-        "attempts": 0,
-        "is_used": False,
-        "reset_token": None
-    }
-    
-    db.otps.insert_one(otp_doc)
-    
-    # Deliver SendGrid email
-    send_otp_email(to_email=request.email, otp_code=otp_code, user_name=user.get("full_name"))
-    
-    return {"message": generic_msg}
+@router.post("/logout")
+def logout(current_user: dict = Depends(get_current_user)):
+    """Logs out the current session."""
+    return {"message": "Logged out successfully."}
 
-@router.post("/resend-otp")
-def resend_otp(request: ResendOTPRequest):
+@router.post("/logout-all")
+def logout_all_sessions(current_user: dict = Depends(get_current_user)):
     """
-    Resends brand-new OTP. Enforces 60-second cooldown and 3/hr resend limit.
+    Logs out the user from all active devices and sessions
+    by updating the user token_version timestamp in the database.
     """
     db = get_db()
-    user = db.users.find_one({"email": request.email})
-    if not user:
-        return {"message": "A new verification code has been sent if the email exists."}
-    
-    # 60s Cooldown check
-    latest_otp = db.otps.find_one({"email": request.email}, sort=[("created_at", -1)])
-    if latest_otp:
-        time_since_creation = (datetime.utcnow() - latest_otp["created_at"]).total_seconds()
-        if time_since_creation < settings.OTP_RESEND_COOLDOWN_SECONDS:
-            remaining_cooldown = int(settings.OTP_RESEND_COOLDOWN_SECONDS - time_since_creation)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Please wait {remaining_cooldown} seconds before requesting a new verification code."
-            )
-            
-    # Max 3/hr limit check
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-    recent_count = db.otps.count_documents({"email": request.email, "created_at": {"$gte": one_hour_ago}})
-    if recent_count >= settings.MAX_OTP_RESENDS_PER_HOUR:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Maximum OTP resend limit reached for this hour. Please try again later."
-        )
-
-    # Invalidate prior OTPs
-    db.otps.update_many({"email": request.email, "is_used": False}, {"$set": {"is_used": True}})
-
-    # Generate new OTP
-    otp_code = str(secrets.SystemRandom().randint(100000, 999999))
-    hashed_otp = get_password_hash(otp_code)
-    expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRATION_MINUTES)
-
-    db.otps.insert_one({
-        "user_id": str(user["_id"]),
-        "email": request.email,
-        "hashed_otp": hashed_otp,
-        "created_at": datetime.utcnow(),
-        "expires_at": expires_at,
-        "attempts": 0,
-        "is_used": False,
-        "reset_token": None
-    })
-
-    send_otp_email(to_email=request.email, otp_code=otp_code, user_name=user.get("full_name"))
-
-    return {"message": "A new 6-digit verification code has been sent to your email."}
-
-@router.post("/verify-otp")
-def verify_otp(request: VerifyOTPRequest):
-    """
-    Step 2: Verifies 6-digit OTP code against bcrypt hash. Enforces 5-minute expiration,
-    one-time use, and max 5 attempts limit. Generates short-lived reset token on success.
-    """
-    db = get_db()
-    otp_doc = db.otps.find_one({"email": request.email, "is_used": False}, sort=[("created_at", -1)])
-    
-    if not otp_doc:
-        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
-
-    # Expiration check
-    if datetime.utcnow() > otp_doc["expires_at"]:
-        db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"is_used": True}})
-        raise HTTPException(status_code=400, detail="Verification code has expired. Please request a new code.")
-
-    # Attempt limit check (max 5 attempts)
-    if otp_doc.get("attempts", 0) >= settings.MAX_OTP_ATTEMPTS:
-        db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"is_used": True}})
-        raise HTTPException(
-            status_code=400, 
-            detail="Maximum verification attempts exceeded. Code invalidated. Please request a new code."
-        )
-
-    # Hash comparison
-    if not verify_password(request.otp_code.strip(), otp_doc["hashed_otp"]):
-        new_attempts = otp_doc.get("attempts", 0) + 1
-        is_used = new_attempts >= settings.MAX_OTP_ATTEMPTS
-        db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"attempts": new_attempts, "is_used": is_used}})
-        
-        remaining = settings.MAX_OTP_ATTEMPTS - new_attempts
-        if remaining <= 0:
-            raise HTTPException(status_code=400, detail="Invalid verification code. Maximum attempts reached. Please request a new code.")
-        raise HTTPException(status_code=400, detail=f"Invalid verification code. {remaining} attempt(s) remaining.")
-
-    # Success: Issue reset token and mark OTP used
-    reset_token = secrets.token_urlsafe(32)
-    db.otps.update_one(
-        {"_id": otp_doc["_id"]},
-        {"$set": {"is_used": True, "reset_token": reset_token}}
-    )
-
-    return {
-        "message": "Verification code confirmed successfully.",
-        "reset_token": reset_token
-    }
-
-@router.post("/reset-password")
-def reset_password(request: ResetPasswordRequest):
-    """
-    Step 3: Validates reset token, checks 12-char strong password rules,
-    verifies non-matching against last 5 passwords, updates bcrypt hash,
-    and invalidates all active tokens.
-    """
-    if request.new_password != request.confirm_password:
-        raise HTTPException(status_code=400, detail="New password and confirm password do not match.")
-
-    db = get_db()
-    otp_doc = db.otps.find_one({"email": request.email, "reset_token": request.reset_token, "is_used": True})
-    if not otp_doc:
-        raise HTTPException(status_code=400, detail="Invalid or expired password reset session.")
-
-    user = db.users.find_one({"email": request.email})
-    if not user:
-        raise HTTPException(status_code=404, detail="User account not found.")
-
-    # Enforce 12-character strong password validation & 5-password history check
-    history = user.get("password_history", [])
-    if "hashed_password" in user and user["hashed_password"] not in history:
-        history.append(user["hashed_password"])
-
-    validate_strong_password(
-        password=request.new_password,
-        user_email=request.email,
-        user_name=user.get("full_name", ""),
-        password_history=history
-    )
-
-    # Hash new password
-    new_hashed_pwd = get_password_hash(request.new_password)
-    history.append(new_hashed_pwd)
-    history = history[-5:]
-
-    # Update User DB
+    user_id = current_user["id"]
     db.users.update_one(
-        {"_id": user["_id"]},
-        {
-            "$set": {
-                "hashed_password": new_hashed_pwd,
-                "password_history": history,
-                "updated_at": datetime.utcnow()
-            }
-        }
+        {"_id": ObjectId(user_id)},
+        {"$set": {"token_version": datetime.utcnow()}}
     )
-
-    # Remove used reset token
-    db.otps.delete_one({"_id": otp_doc["_id"]})
-
-    return {"message": "Your password has been successfully updated. Please log in with your new password."}
-
-@router.post("/send-otp")
-@router.post("/passwordless/request")
-def passwordless_request(request: PasswordlessLoginRequest):
-    """
-    Sends a cryptographically secure 6-digit SendGrid OTP for email verification.
-    Protects against user enumeration by returning a uniform response.
-    Returns HTTP 500 if SendGrid fails to dispatch the message.
-    """
-    print(f"\n[OTP] Request received")
-    print(f"[OTP] Request received for: {request.email}")
-    db = get_db()
-    generic_msg = "If this email is registered, a verification code has been sent."
-
-    # Email validation log
-    print(f"[OTP] Email validated")
-
-    # Rate limiting: max 3 requests per hour per email
-    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-    recent_count = db.otps.count_documents({
-        "email": request.email,
-        "created_at": {"$gte": one_hour_ago}
-    })
-    if recent_count >= settings.MAX_OTP_RESENDS_PER_HOUR:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Maximum OTP requests reached for this hour. Please try again later."
-        )
-
-    # Invalidate previous unverified OTPs
-    db.otps.update_many({"email": request.email, "is_used": False}, {"$set": {"is_used": True}})
-
-    # Cryptographically secure 6-digit OTP generator (never use predictable math.random)
-    otp_code = str(secrets.SystemRandom().randint(100000, 999999))
-    print(f"[OTP] Secure OTP generated")
-
-    hashed_otp = get_password_hash(otp_code)
-    expires_at = datetime.utcnow() + timedelta(minutes=settings.OTP_EXPIRATION_MINUTES)
-
-    user = db.users.find_one({"email": request.email})
-    user_id = str(user["_id"]) if user else None
-    user_name = user.get("full_name") if user else None
-
-    db.otps.insert_one({
-        "user_id": user_id,
-        "email": request.email,
-        "hashed_otp": hashed_otp,
-        "created_at": datetime.utcnow(),
-        "expires_at": expires_at,
-        "attempts": 0,
-        "is_used": False,
-        "reset_token": None
-    })
-    print(f"[OTP] OTP stored successfully")
-
-    # Dispatch actual SendGrid email
-    success, err_detail = send_otp_email(to_email=request.email, otp_code=otp_code, user_name=user_name)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not send the verification code. {err_detail}"
-        )
-
-    return {"success": True, "message": generic_msg}
-
-@router.post("/test-email")
-def test_sendgrid_email(request: PasswordlessLoginRequest):
-    """
-    Temporary development test endpoint to verify SendGrid configuration directly.
-    """
-    print(f"\n[TEST EMAIL] Testing SendGrid delivery to: {request.email}")
-    test_otp = str(secrets.SystemRandom().randint(100000, 999999))
-    sent = send_otp_email(to_email=request.email, otp_code=test_otp, user_name="Test User")
-    if not sent:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="SendGrid test email failed. Check server console for exact SendGrid error details."
-        )
-    return {"success": True, "message": f"Test email accepted by SendGrid for {request.email}."}
-
-@router.post("/verify-otp")
-@router.post("/passwordless/verify")
-def passwordless_verify(request: PasswordlessVerifyRequest):
-    """
-    Verifies the 6-digit OTP code for passwordless login.
-    If user exists, issues JWT tokens and logs user in immediately.
-    """
-    code_val = (request.otp or request.otp_code or "").strip()
-    if not code_val or len(code_val) != 6:
-        raise HTTPException(status_code=400, detail="Please enter the complete 6-digit verification code.")
-
-    db = get_db()
-    otp_doc = db.otps.find_one({"email": request.email, "is_used": False}, sort=[("created_at", -1)])
-
-    if not otp_doc:
-        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
-
-    # Expiration check
-    if datetime.utcnow() > otp_doc["expires_at"]:
-        db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"is_used": True}})
-        raise HTTPException(status_code=400, detail="Verification code has expired. Please request a new code.")
-
-    # Attempt limit check
-    if otp_doc.get("attempts", 0) >= settings.MAX_OTP_ATTEMPTS:
-        db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"is_used": True}})
-        raise HTTPException(
-            status_code=400,
-            detail="Maximum verification attempts exceeded. Please request a new code."
-        )
-
-    # Hash comparison
-    if not verify_password(code_val, otp_doc["hashed_otp"]):
-        new_attempts = otp_doc.get("attempts", 0) + 1
-        is_used = new_attempts >= settings.MAX_OTP_ATTEMPTS
-        db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"attempts": new_attempts, "is_used": is_used}})
-
-        remaining = settings.MAX_OTP_ATTEMPTS - new_attempts
-        if remaining <= 0:
-            raise HTTPException(status_code=400, detail="Invalid verification code. Maximum attempts reached.")
-        raise HTTPException(status_code=400, detail=f"Invalid verification code. {remaining} attempt(s) remaining.")
-
-    # Success: Mark OTP as used
-    db.otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"is_used": True}})
-
-    # Find existing user
-    user = db.users.find_one({"email": request.email})
-    if not user:
-        # Create a new user automatically for passwordless email onboarding
-        role = "admin" if request.email.startswith("admin@") else "user"
-        new_user = {
-            "email": request.email,
-            "hashed_password": get_password_hash(secrets.token_urlsafe(16)),
-            "full_name": request.email.split("@")[0].capitalize(),
-            "role": role,
-            "is_verified": True,
-            "password_history": [],
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        res = db.users.insert_one(new_user)
-        user_id = str(res.inserted_id)
-        user = db.users.find_one({"_id": ObjectId(user_id)})
-
-    user_id = str(user["_id"])
-    role = user.get("role", "user")
-
-    access_token = create_access_token(data={"sub": user_id, "role": role})
-    refresh_token = create_refresh_token(data={"sub": user_id, "role": role})
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "user": {
-            "id": user_id,
-            "email": user["email"],
-            "full_name": user.get("full_name", user["email"].split("@")[0]),
-            "is_verified": True,
-            "created_at": user.get("created_at", datetime.utcnow()).isoformat()
-        }
-    }
+    return {"message": "Logged out from all active devices and sessions."}
 
 @router.delete("/delete-account")
 def delete_account(current_user: dict = Depends(get_current_user)):

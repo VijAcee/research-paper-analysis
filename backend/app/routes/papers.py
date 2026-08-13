@@ -90,9 +90,15 @@ def process_and_save_paper(
             detail="Failed to index document content inside semantic vector database."
         )
         
-    # 3. Generate structured AI research analysis
+    # 3. Generate structured AI research analysis reading user settings
     try:
-        analysis_data = generate_paper_analysis(title, raw_text, abstract)
+        user_settings = None
+        if user_id:
+            user_doc = db.users.find_one({"_id": ObjectId(user_id)})
+            if user_doc and "settings" in user_doc:
+                user_settings = user_doc["settings"]
+
+        analysis_data = generate_paper_analysis(title, raw_text, abstract, user_settings=user_settings)
         # Store as dict inside Mongo
         db.papers.update_one(
             {"_id": ObjectId(paper_id)},
@@ -316,3 +322,38 @@ def delete_paper(paper_id: str, current_user: dict = Depends(get_current_user)):
     db.conversations.delete_many({"paper_id": paper_id})
     
     return {"message": "Paper and all related chat sessions deleted successfully."}
+
+@router.post("/{paper_id}/reanalyze", response_model=PaperDetailResponse)
+def reanalyze_paper(paper_id: str, current_user: dict = Depends(get_current_user)):
+    """Re-generates AI research analysis for an existing paper using current user settings."""
+    db = get_db()
+    try:
+        paper = db.papers.find_one({"_id": ObjectId(paper_id), "user_id": current_user["id"]})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Paper not found")
+        
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found or unauthorized")
+
+    user_doc = db.users.find_one({"_id": ObjectId(current_user["id"])})
+    user_settings = user_doc.get("settings", {}) if user_doc else {}
+
+    title = paper.get("title", "Research Paper")
+    abstract = paper.get("abstract", "")
+    
+    # Retrieve indexed chunks text or abstract
+    from app.services.vector_store import query_paper_chunks
+    chunks = query_paper_chunks(paper_id, query_text="background methodology results findings", top_k=8)
+    raw_text = "\n\n".join([c["text"] for c in chunks]) if chunks else abstract
+
+    analysis_data = generate_paper_analysis(title, raw_text, abstract, user_settings=user_settings)
+
+    db.papers.update_one(
+        {"_id": ObjectId(paper_id)},
+        {"$set": {"analysis": analysis_data.model_dump()}}
+    )
+    
+    paper["analysis"] = analysis_data
+    paper["id"] = str(paper["_id"])
+    return paper
+

@@ -53,14 +53,7 @@ app.include_router(settings_route.router, prefix="/api")
 
 @app.on_event("startup")
 def startup_checks():
-    api_key_val = (os.getenv("SENDGRID_API_KEY") or settings.SENDGRID_API_KEY or "").strip()
-    from_email_val = (os.getenv("SENDGRID_FROM_EMAIL") or settings.SENDGRID_FROM_EMAIL or "").strip()
-    prefix = api_key_val[:3] if api_key_val else "MISSING"
-    print(f"[CONFIG] SENDGRID_API_KEY exists: {bool(api_key_val)}")
-    print(f"[CONFIG] SENDGRID_API_KEY prefix: {prefix}")
-    print(f"[SENDGRID CONFIG]")
-    print(f"API key present: {bool(api_key_val)}")
-    print(f"Sender email configured: {bool(from_email_val)}")
+    print("[CONFIG] PaperLens Backend Service Started.")
 
 @app.get("/api/health")
 def health_check():
@@ -69,8 +62,6 @@ def health_check():
         "status": "online",
         "timestamp": datetime.datetime.now().isoformat(),
         "environment": settings.ENVIRONMENT,
-        "sendgrid_api_key_configured": bool(os.getenv("SENDGRID_API_KEY") or settings.SENDGRID_API_KEY),
-        "sendgrid_from_email_configured": bool(os.getenv("SENDGRID_FROM_EMAIL") or settings.SENDGRID_FROM_EMAIL),
         "security": "JWT_AUTH_ISOLATED"
     }
 

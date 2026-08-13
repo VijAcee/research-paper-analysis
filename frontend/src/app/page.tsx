@@ -756,13 +756,14 @@ function generateDynamicPaperAnalysis(title: string, textContent?: string): Comp
     story_what_they_found: `The study discovered statistically significant performance improvements and consistent reliability across benchmark conditions in ${domain}.`,
     story_why_it_matters: `This study advances scientific understanding in ${subjectArea}, providing actionable guidance for researchers, students, and industry professionals.`,
     story_important_caveats: `Evaluation scope was constrained to specific study sample parameters; results should not be generalized to unverified demographic or environmental edge cases without localized recalibration.`,
-    story_paper_in_one_paragraph: `In summary, this paper presents a comprehensive, evidence-based investigation of '${cleanTitle}' in ${domain}. By introducing a structured analytical methodology and evaluating it against domain benchmarks, the authors establish clear empirical proof and actionable frameworks for researchers and practitioners.`
   };
 }
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export default function AuthenticatedWorkspace() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "register" | "otp">("login");
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [showPassword, setShowPassword] = useState(false);
 
   // Form State
@@ -772,300 +773,6 @@ export default function AuthenticatedWorkspace() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Passwordless Login State
-  const [passwordlessStep, setPasswordlessStep] = useState<1 | 2>(1);
-  const [passwordlessEmail, setPasswordlessEmail] = useState("");
-  const [passwordlessOtp, setPasswordlessOtp] = useState(["", "", "", "", "", ""]);
-  const [passwordlessTimer, setPasswordlessTimer] = useState(60);
-  const [isPasswordlessResendDisabled, setIsPasswordlessResendDisabled] = useState(false);
-  const [isSubmittingPasswordless, setIsSubmittingPasswordless] = useState(false);
-
-  useEffect(() => {
-    let timer: any;
-    if (isPasswordlessResendDisabled && passwordlessTimer > 0) {
-      timer = setInterval(() => {
-        setPasswordlessTimer((prev) => prev - 1);
-      }, 1000);
-    } else if (passwordlessTimer === 0) {
-      setIsPasswordlessResendDisabled(false);
-    }
-    return () => clearInterval(timer);
-  }, [isPasswordlessResendDisabled, passwordlessTimer]);
-
-  const maskEmail = (email: string) => {
-    if (!email || !email.includes("@")) return email;
-    const [name, domain] = email.split("@");
-    if (name.length <= 2) return `${name[0]}***@${domain}`;
-    return `${name[0]}***${name[name.length - 1]}@${domain}`;
-  };
-
-  const handleRequestPasswordlessOTP = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!passwordlessEmail.trim()) {
-      setAuthError("Please enter your registered email address.");
-      return;
-    }
-    setAuthError(null);
-    setAuthMessage(null);
-    setIsSubmittingPasswordless(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/auth/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: passwordlessEmail.trim() })
-      });
-      const data = await res.json();
-      setIsSubmittingPasswordless(false);
-
-      if (!res.ok) {
-        setAuthError(data.detail || "Could not send the verification code. Please try again.");
-        return;
-      }
-
-      setPasswordlessStep(2);
-      setAuthMessage("Verification code sent. Check your email.");
-      setPasswordlessTimer(60);
-      setIsPasswordlessResendDisabled(true);
-    } catch (err: any) {
-      setIsSubmittingPasswordless(false);
-      setAuthError(err.message || "Unable to connect to backend server at http://localhost:8000.");
-    }
-  };
-
-  const handlePasswordlessVerifyOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const fullCode = passwordlessOtp.join("").trim();
-    if (fullCode.length !== 6) {
-      setAuthError("Please enter the complete 6-digit verification code.");
-      return;
-    }
-    setAuthError(null);
-    setAuthMessage(null);
-    setIsSubmittingPasswordless(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/auth/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: passwordlessEmail.trim(), otp: fullCode })
-      });
-      const data = await res.json();
-      setIsSubmittingPasswordless(false);
-
-      if (!res.ok) {
-        setAuthError(data.detail || "Invalid verification code.");
-        return;
-      }
-
-      // Login success
-      const user: User = {
-        id: data.user?.id || "user_" + Date.now(),
-        email: passwordlessEmail.trim(),
-        fullName: data.user?.full_name || passwordlessEmail.trim().split("@")[0].toUpperCase(),
-        role: passwordlessEmail.trim().startsWith("admin@") ? "admin" : "user"
-      };
-      if (data.access_token) {
-        localStorage.setItem("researchgpt_token", data.access_token);
-      }
-      localStorage.setItem("researchgpt_user", JSON.stringify(user));
-      loadUserData(user);
-    } catch {
-      setIsSubmittingPasswordless(false);
-      setAuthError("Unable to verify code. Please try again.");
-    }
-  };
-
-  // Password Reset & SendGrid OTP State
-  const [recoveryStep, setRecoveryStep] = useState<1 | 2 | 3 | 4>(1);
-  const [recoveryEmail, setRecoveryEmail] = useState("");
-  const [otpInput, setOtpInput] = useState(["", "", "", "", "", ""]);
-  const [resetToken, setResetToken] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [resendTimer, setResendTimer] = useState(60);
-  const [isResendDisabled, setIsResendDisabled] = useState(false);
-  const [isSubmittingRecovery, setIsSubmittingRecovery] = useState(false);
-  const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    let timer: any;
-    if (isResendDisabled && resendTimer > 0) {
-      timer = setInterval(() => {
-        setResendTimer((prev) => prev - 1);
-      }, 1000);
-    } else if (resendTimer === 0) {
-      setIsResendDisabled(false);
-    }
-    return () => clearInterval(timer);
-  }, [isResendDisabled, resendTimer]);
-
-  const handleRequestOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!recoveryEmail.trim()) {
-      setRecoveryError("Please enter your registered email address.");
-      return;
-    }
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-    setIsSubmittingRecovery(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: recoveryEmail.trim() })
-      });
-      const data = await res.json();
-      setIsSubmittingRecovery(false);
-
-      if (!res.ok) {
-        setRecoveryError(data.detail || "Failed to process password recovery request.");
-        return;
-      }
-
-      setRecoveryStep(2);
-      setRecoveryMessage(data.message || "If an account exists for this email, a verification code has been sent.");
-      setResendTimer(60);
-      setIsResendDisabled(true);
-    } catch {
-      setIsSubmittingRecovery(false);
-      // Fallback response for offline development
-      setRecoveryStep(2);
-      setRecoveryMessage("If an account exists for this email, a verification code has been sent.");
-      setResendTimer(60);
-      setIsResendDisabled(true);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    if (isResendDisabled) return;
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-    setIsSubmittingRecovery(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/auth/resend-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: recoveryEmail.trim() })
-      });
-      const data = await res.json();
-      setIsSubmittingRecovery(false);
-
-      if (!res.ok) {
-        setRecoveryError(data.detail || "Failed to resend verification code.");
-        return;
-      }
-
-      setRecoveryMessage("A new 6-digit verification code has been sent to your email.");
-      setResendTimer(60);
-      setIsResendDisabled(true);
-    } catch {
-      setIsSubmittingRecovery(false);
-      setRecoveryMessage("A new 6-digit verification code has been sent to your email.");
-      setResendTimer(60);
-      setIsResendDisabled(true);
-    }
-  };
-
-  const handleVerifyOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const fullCode = otpInput.join("").trim();
-    if (fullCode.length !== 6) {
-      setRecoveryError("Please enter the complete 6-digit verification code.");
-      return;
-    }
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-    setIsSubmittingRecovery(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/auth/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: recoveryEmail.trim(), otp_code: fullCode })
-      });
-      const data = await res.json();
-      setIsSubmittingRecovery(false);
-
-      if (!res.ok) {
-        setRecoveryError(data.detail || "Invalid verification code.");
-        return;
-      }
-
-      setResetToken(data.reset_token);
-      setRecoveryStep(3);
-      setRecoveryMessage("Verification code confirmed successfully. Please create your new password.");
-    } catch {
-      setIsSubmittingRecovery(false);
-      // Dev mode fallback
-      setResetToken("mock_reset_token_dev");
-      setRecoveryStep(3);
-      setRecoveryMessage("Verification code confirmed successfully. Please create your new password.");
-    }
-  };
-
-  const handleResetPasswordSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (newPassword !== confirmPassword) {
-      setRecoveryError("New password and confirm password do not match.");
-      return;
-    }
-    if (newPassword.length < 12) {
-      setRecoveryError("Password must be at least 12 characters long.");
-      return;
-    }
-    if (!/[A-Z]/.test(newPassword)) {
-      setRecoveryError("Password must contain at least one uppercase letter.");
-      return;
-    }
-    if (!/[a-z]/.test(newPassword)) {
-      setRecoveryError("Password must contain at least one lowercase letter.");
-      return;
-    }
-    if (!/[0-9]/.test(newPassword)) {
-      setRecoveryError("Password must contain at least one number.");
-      return;
-    }
-    if (!/[!@#$%^&*(),.?":{}|<>]/.test(newPassword)) {
-      setRecoveryError("Password must contain at least one special character.");
-      return;
-    }
-
-    setRecoveryError(null);
-    setRecoveryMessage(null);
-    setIsSubmittingRecovery(true);
-
-    try {
-      const res = await fetch("http://localhost:8000/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: recoveryEmail.trim(),
-          reset_token: resetToken,
-          new_password: newPassword,
-          confirm_password: confirmPassword
-        })
-      });
-      const data = await res.json();
-      setIsSubmittingRecovery(false);
-
-      if (!res.ok) {
-        setRecoveryError(data.detail || "Failed to update password.");
-        return;
-      }
-
-      setRecoveryStep(4);
-      setRecoveryMessage("Your password has been successfully updated.");
-    } catch {
-      setIsSubmittingRecovery(false);
-      setRecoveryStep(4);
-      setRecoveryMessage("Your password has been successfully updated.");
-    }
-  };
 
   // App Navigation
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -1148,7 +855,7 @@ export default function AuthenticatedWorkspace() {
 
   useEffect(() => {
     if (currentUser?.token) {
-      fetch("http://localhost:8000/api/settings", {
+      fetch(`${API_BASE_URL}/api/settings`, {
         headers: { Authorization: `Bearer ${currentUser.token}` }
       })
         .then((res) => (res.ok ? res.json() : null))
@@ -1183,7 +890,7 @@ export default function AuthenticatedWorkspace() {
     if (!currentUser?.token) return;
 
     try {
-      await fetch("http://localhost:8000/api/settings", {
+      const res = await fetch(`${API_BASE_URL}/api/settings`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -1196,17 +903,22 @@ export default function AuthenticatedWorkspace() {
           theme: updatedTheme
         })
       });
-      setSettingsMessage("Preferences updated and saved to account.");
-      setTimeout(() => setSettingsMessage(null), 3000);
+      if (res.ok) {
+        setSettingsMessage("Settings saved.");
+        setTimeout(() => setSettingsMessage(null), 3000);
+      } else {
+        setSettingsMessage("Could not save settings. Please try again.");
+      }
     } catch (err) {
       console.error("Failed to save user settings:", err);
+      setSettingsMessage("Could not save settings. Please try again.");
     }
   };
 
   const handleDeleteAllPapers = async () => {
     if (!currentUser?.token) return;
     try {
-      const res = await fetch("http://localhost:8000/api/settings/papers", {
+      const res = await fetch(`${API_BASE_URL}/api/settings/papers`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${currentUser.token}` }
       });
@@ -1224,7 +936,7 @@ export default function AuthenticatedWorkspace() {
   const handleClearHistory = async () => {
     if (!currentUser?.token) return;
     try {
-      const res = await fetch("http://localhost:8000/api/settings/history", {
+      const res = await fetch(`${API_BASE_URL}/api/settings/history`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${currentUser.token}` }
       });
@@ -1243,7 +955,7 @@ export default function AuthenticatedWorkspace() {
   const handleDownloadMyData = async () => {
     if (!currentUser?.token) return;
     try {
-      const res = await fetch("http://localhost:8000/api/settings/download-data", {
+      const res = await fetch(`${API_BASE_URL}/api/settings/download-data`, {
         headers: { Authorization: `Bearer ${currentUser.token}` }
       });
       if (res.ok) {
@@ -1309,7 +1021,7 @@ export default function AuthenticatedWorkspace() {
   const [backendStatus, setBackendStatus] = useState<"online" | "offline">("offline");
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/health")
+    fetch(`${API_BASE_URL}/api/health`)
       .then((res) => res.json())
       .then(() => setBackendStatus("online"))
       .catch(() => setBackendStatus("offline"));
@@ -1368,17 +1080,22 @@ export default function AuthenticatedWorkspace() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch("http://localhost:8000/api/auth/login", {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password })
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // Fallback for non-JSON body
+      }
       setIsSubmitting(false);
 
       if (!res.ok) {
-        setAuthError(data.detail || "Authentication failed. Please check your credentials.");
+        setAuthError(data?.detail || data?.message || "Authentication failed. Please check your credentials.");
         return;
       }
 
@@ -1398,7 +1115,7 @@ export default function AuthenticatedWorkspace() {
       loadUserData(userObj);
     } catch (err: any) {
       setIsSubmitting(false);
-      setAuthError(err.message || "Unable to connect to backend server at http://localhost:8000.");
+      setAuthError(err.message === "Failed to fetch" ? `Unable to connect to backend server at ${API_BASE_URL}.` : (err.message || "Unable to connect to backend server."));
     }
   };
 
@@ -1423,17 +1140,22 @@ export default function AuthenticatedWorkspace() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch("http://localhost:8000/api/auth/register", {
+      const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password, full_name: fullName || undefined })
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        // Fallback for non-JSON body
+      }
       setIsSubmitting(false);
 
       if (!res.ok) {
-        setAuthError(data.detail || "Account creation failed.");
+        setAuthError(data?.detail || data?.message || "Account creation failed.");
         return;
       }
 
@@ -1453,7 +1175,7 @@ export default function AuthenticatedWorkspace() {
       loadUserData(userObj);
     } catch (err: any) {
       setIsSubmitting(false);
-      setAuthError(err.message || "Unable to connect to backend server at http://localhost:8000.");
+      setAuthError(err.message === "Failed to fetch" ? `Unable to connect to backend server at ${API_BASE_URL}.` : (err.message || "Unable to connect to backend server."));
     }
   };
 
@@ -1683,7 +1405,6 @@ export default function AuthenticatedWorkspace() {
             <p className="text-sm text-slate-400">
               {authMode === "login" && "Sign in to your account with email and password."}
               {authMode === "register" && "Create a new account with email and password."}
-              {authMode === "otp" && "Passwordless login using a 6-digit email OTP code."}
             </p>
           </div>
 
@@ -1757,31 +1478,15 @@ export default function AuthenticatedWorkspace() {
                 {isSubmitting ? <span>Signing In...</span> : <span>Sign In →</span>}
               </button>
 
-              <div className="pt-2 border-t border-slate-800 space-y-3 text-center text-xs">
+              <div className="pt-2 border-t border-slate-800 text-center text-xs text-slate-400">
+                Don't have an account?{" "}
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthMode("otp");
-                    setPasswordlessEmail(authEmail);
-                    setPasswordlessStep(1);
-                    setAuthError(null);
-                    setAuthMessage(null);
-                  }}
-                  className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold transition-all border border-slate-700"
+                  onClick={() => { setAuthMode("register"); setAuthError(null); setAuthMessage(null); }}
+                  className="text-blue-400 font-bold hover:underline"
                 >
-                  Login with OTP instead
+                  Create Account
                 </button>
-
-                <div className="text-slate-400">
-                  Don't have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => { setAuthMode("register"); setAuthError(null); setAuthMessage(null); }}
-                    className="text-blue-400 font-bold hover:underline"
-                  >
-                    Create Account
-                  </button>
-                </div>
               </div>
             </form>
           )}
@@ -1845,122 +1550,7 @@ export default function AuthenticatedWorkspace() {
             </form>
           )}
 
-          {/* 3. PASSWORDLESS OTP MODE */}
-          {authMode === "otp" && (
-            <div className="space-y-5 animate-fadeIn">
-              {passwordlessStep === 1 && (
-                <form onSubmit={handleRequestPasswordlessOTP} className="space-y-5">
-                  <div>
-                    <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Email Address</label>
-                    <input
-                      type="email"
-                      value={passwordlessEmail}
-                      onChange={(e) => setPasswordlessEmail(e.target.value)}
-                      placeholder="name@organization.com"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 mt-1.5"
-                      required
-                    />
-                  </div>
 
-                  <button
-                    type="submit"
-                    disabled={isSubmittingPasswordless}
-                    className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
-                  >
-                    {isSubmittingPasswordless ? <span>Sending verification code...</span> : <span>Send OTP →</span>}
-                  </button>
-
-                  <div className="pt-2 border-t border-slate-800 text-center text-xs">
-                    <button
-                      type="button"
-                      onClick={() => { setAuthMode("login"); setAuthError(null); setAuthMessage(null); }}
-                      className="text-slate-400 hover:text-white font-semibold underline"
-                    >
-                      ← Back to password login
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {passwordlessStep === 2 && (
-                <form onSubmit={handlePasswordlessVerifyOtp} className="space-y-5 animate-fadeIn">
-                  <div className="text-center space-y-1">
-                    <h2 className="text-xl font-extrabold text-white">Enter 6-Digit Code</h2>
-                    <p className="text-xs text-slate-400">
-                      We sent a security code to <strong className="text-blue-400">{maskEmail(passwordlessEmail)}</strong>
-                    </p>
-                  </div>
-
-                  {/* 6-DIGIT OTP INPUT BOXES */}
-                  <div className="flex justify-between gap-2">
-                    {passwordlessOtp.map((digit, idx) => (
-                      <input
-                        key={idx}
-                        id={`pwless-otp-${idx}`}
-                        type="text"
-                        maxLength={1}
-                        value={digit}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/[^0-9]/g, "");
-                          const newOtp = [...passwordlessOtp];
-                          newOtp[idx] = val;
-                          setPasswordlessOtp(newOtp);
-                          if (val && idx < 5) {
-                            const nextEl = document.getElementById(`pwless-otp-${idx + 1}`);
-                            if (nextEl) nextEl.focus();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Backspace" && !passwordlessOtp[idx] && idx > 0) {
-                            const prevEl = document.getElementById(`pwless-otp-${idx - 1}`);
-                            if (prevEl) prevEl.focus();
-                          }
-                        }}
-                        className="w-12 h-14 bg-slate-950 border border-slate-800 rounded-xl text-center font-mono font-black text-xl text-blue-400 focus:outline-none focus:border-blue-500"
-                      />
-                    ))}
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmittingPasswordless || passwordlessOtp.join("").length !== 6}
-                    className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
-                  >
-                    {isSubmittingPasswordless ? <span>Verifying OTP & Logging In...</span> : <span>Verify & Sign In →</span>}
-                  </button>
-
-                  <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => { setPasswordlessStep(1); setPasswordlessOtp(["", "", "", "", "", ""]); }}
-                      className="text-slate-400 hover:text-white underline font-semibold"
-                    >
-                      ← Change Email
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleRequestPasswordlessOTP}
-                      disabled={isPasswordlessResendDisabled || isSubmittingPasswordless}
-                      className="font-bold text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline"
-                    >
-                      {isPasswordlessResendDisabled ? `Resend OTP in ${passwordlessTimer}s` : "Resend Code"}
-                    </button>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-800 text-center text-xs">
-                    <button
-                      type="button"
-                      onClick={() => { setAuthMode("login"); setAuthError(null); setAuthMessage(null); }}
-                      className="text-slate-400 hover:text-white font-semibold underline"
-                    >
-                      ← Back to password login
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          )}
         </div>
       </div>
     );
@@ -3735,7 +3325,7 @@ export default function AuthenticatedWorkspace() {
                       }
 
                       try {
-                        const res = await fetch("http://localhost:8000/api/auth/change-password", {
+                        const res = await fetch(`${API_BASE_URL}/api/auth/change-password`, {
                           method: "POST",
                           headers: {
                             "Content-Type": "application/json",
@@ -3771,18 +3361,7 @@ export default function AuthenticatedWorkspace() {
                     Update Password
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleLogout();
-                      setAuthMode("otp");
-                      setPasswordlessEmail(currentUser.email);
-                      setPasswordlessStep(1);
-                    }}
-                    className="text-xs font-bold text-blue-600 hover:underline"
-                  >
-                    Forgot Password?
-                  </button>
+
                 </div>
               </div>
 
@@ -3806,8 +3385,15 @@ export default function AuthenticatedWorkspace() {
                   </button>
 
                   <button
-                    onClick={() => {
-                      alert("Successfully logged out from all active devices.");
+                    onClick={async () => {
+                      if (currentUser?.token) {
+                        try {
+                          await fetch(`${API_BASE_URL}/api/auth/logout-all`, {
+                            method: "POST",
+                            headers: { Authorization: `Bearer ${currentUser.token}` }
+                          });
+                        } catch {}
+                      }
                       handleLogout();
                     }}
                     className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold rounded-xl"
@@ -3944,9 +3530,71 @@ export default function AuthenticatedWorkspace() {
                     ))}
                   </div>
                 </div>
+
+                {/* LANGUAGE */}
+                <div className="space-y-3 pt-2">
+                  <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Language</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      {
+                        lang: "English",
+                        desc: "Generate analysis in standard English."
+                      },
+                      {
+                        lang: "Hindi",
+                        desc: "Generate analysis in natural Hindi while keeping technical terms clear."
+                      }
+                    ].map((opt) => (
+                      <button
+                        key={opt.lang}
+                        onClick={() => handleSaveSettings(undefined, undefined, opt.lang, undefined)}
+                        className={`p-4 rounded-2xl border text-left transition-all space-y-1.5 ${
+                          analysisLanguage === opt.lang
+                            ? "bg-blue-50/70 border-blue-600 shadow-xs"
+                            : "bg-white border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`text-sm font-bold ${analysisLanguage === opt.lang ? "text-blue-900" : "text-slate-900"}`}>{opt.lang}</span>
+                          {analysisLanguage === opt.lang && <span className="w-2 h-2 rounded-full bg-blue-600" />}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">{opt.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              {/* 2. PRIVACY & DATA */}
+              {/* 2. APPEARANCE */}
+              <div className="bg-white p-7 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <h2 className="text-lg font-black text-slate-900">Appearance</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Set theme presentation for your workspace interface.</p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {[
+                    { mode: "Light", label: "Light" },
+                    { mode: "Dark", label: "Dark" },
+                    { mode: "System Default", label: "System Default" }
+                  ].map((opt) => (
+                    <button
+                      key={opt.mode}
+                      onClick={() => handleSaveSettings(undefined, undefined, undefined, opt.mode)}
+                      className={`p-4 rounded-2xl border text-left transition-all flex items-center justify-between ${
+                        themeMode === opt.mode
+                          ? "bg-slate-900 text-white border-slate-900 shadow-xs font-bold"
+                          : "bg-white text-slate-800 border-slate-200 hover:border-slate-300 font-semibold"
+                      }`}
+                    >
+                      <span className="text-xs font-bold">{opt.label}</span>
+                      {themeMode === opt.mode && <span className="text-xs font-extrabold text-blue-400">Selected</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. PRIVACY & DATA */}
               <div className="bg-white p-7 rounded-3xl border border-slate-200 shadow-xs space-y-6">
                 <div className="border-b border-slate-100 pb-3">
                   <h2 className="text-lg font-black text-slate-900">Privacy & Data</h2>

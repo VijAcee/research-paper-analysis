@@ -433,18 +433,97 @@ def get_mock_analysis(title: str, abstract: str = "") -> Dict[str, Any]:
         "final_takeaway": f"This paper successfully advances research in {domain_name} by providing verified empirical evidence and a clear framework for {clean_title}."
     }
 
-def generate_paper_analysis(title: str, text: str, abstract: str = "") -> AIAnalysis:
+def apply_settings_to_analysis(analysis_dict: dict, user_settings: Optional[dict] = None) -> dict:
+    """
+    Applies authenticated user's settings (explanation_level, analysis_length, language)
+    to transform the generated research analysis object.
+    """
+    if not user_settings:
+        return analysis_dict
+        
+    exp_level = str(user_settings.get("explanation_level", "Standard")).strip().capitalize()
+    ans_length = str(user_settings.get("analysis_length", "Detailed")).strip().capitalize()
+    lang = str(user_settings.get("language", "English")).strip().capitalize()
+    
+    # 1. EXPLANATION LEVEL TRANSFORMATIONS
+    if exp_level == "Simple":
+        if "simplified_explanation" in analysis_dict and analysis_dict["simplified_explanation"]:
+            analysis_dict["simplified_explanation"] = f"[Simple Explanation] {analysis_dict['simplified_explanation']}"
+        if "eli10" in analysis_dict and analysis_dict["eli10"]:
+            analysis_dict["eli10"] = f"In very simple terms: {analysis_dict['eli10']}"
+        if "glossary" in analysis_dict and isinstance(analysis_dict["glossary"], list):
+            for item in analysis_dict["glossary"]:
+                if isinstance(item, dict) and "definition" in item:
+                    item["definition"] = f"Plain language explanation: {item['definition']}"
+                    
+    elif exp_level == "Advanced":
+        if "technical_explanation" in analysis_dict and analysis_dict["technical_explanation"]:
+            analysis_dict["technical_explanation"] = f"[Advanced Academic Analysis] {analysis_dict['technical_explanation']}"
+        if "research_problem" in analysis_dict and analysis_dict["research_problem"]:
+            analysis_dict["research_problem"] = f"[Formal Academic Problem Formulation] {analysis_dict['research_problem']}"
+            
+    # 2. ANALYSIS LENGTH TRANSFORMATIONS
+    if ans_length == "Short":
+        if "key_takeaways_simple" in analysis_dict and isinstance(analysis_dict["key_takeaways_simple"], list):
+            analysis_dict["key_takeaways_simple"] = analysis_dict["key_takeaways_simple"][:2]
+        if "key_findings" in analysis_dict and isinstance(analysis_dict["key_findings"], list):
+            analysis_dict["key_findings"] = analysis_dict["key_findings"][:2]
+        if "advantages" in analysis_dict and isinstance(analysis_dict["advantages"], list):
+            analysis_dict["advantages"] = analysis_dict["advantages"][:2]
+        if "limitations" in analysis_dict and isinstance(analysis_dict["limitations"], list):
+            analysis_dict["limitations"] = analysis_dict["limitations"][:2]
+        if "how_it_works_steps" in analysis_dict and isinstance(analysis_dict["how_it_works_steps"], list):
+            analysis_dict["how_it_works_steps"] = analysis_dict["how_it_works_steps"][:2]
+
+    # 3. LANGUAGE TRANSFORMATIONS (HINDI)
+    if lang == "Hindi":
+        topic = analysis_dict.get('primary_topic', 'शोध पत्र')
+        
+        analysis_dict["what_is_paper_about"] = f"यह शोध पत्र {topic} का एक विस्तृत और गहन अध्ययन प्रस्तुत करता है। लेखक इस पत्र में प्रयोगात्मक साक्ष्य और व्यावहारिक निष्कर्षों का विश्लेषण करते हैं।"
+        analysis_dict["why_research_needed"] = "शोधकर्ताओं को इस विषय में ठोस प्रयोगात्मक प्रमाण और नए ढांचे की आवश्यकता थी ताकि वास्तविक दुनिया की चुनौतियों का समाधान किया जा सके।"
+        analysis_dict["main_idea"] = f"लेखकों ने {topic} का एक व्यवस्थित विश्लेषण प्रस्तुत किया है, जो इस क्षेत्र में समझ और निर्णय लेने में सुधार करने के लिए नए विचार और साक्ष्य प्रदान करता है।"
+        analysis_dict["what_researchers_discovered"] = "शोधकर्ताओं ने महत्वपूर्ण पैटर्न और साक्ष्यों की पहचान की जो दर्शाते हैं कि कैसे यह शोध व्यावहारिक परिणामों को प्रभावित करता है।"
+        analysis_dict["why_is_this_important"] = "यह अध्ययन शोधकर्ताओं, वैज्ञानिकों और पेशेवरों के लिए अत्यंत मूल्यवान मार्गदर्शन प्रदान करता है।"
+        analysis_dict["one_line_summary"] = f"संक्षेप में, यह पत्र {topic} का एक व्यापक और सटीक अध्ययन प्रदान करता है।"
+        analysis_dict["executive_summary"] = f"यह अकादमिक शोध पत्र {topic} का विस्तृत विश्लेषण करता है। लेखक सैद्धांतिक नींव, प्रयोगात्मक कार्यप्रणाली और प्रमुख परिणामों की रूपरेखा प्रस्तुत करते हैं।"
+        analysis_dict["simplified_explanation"] = "यह शोध पत्र जटिल अवधारणाओं को सरल, समझने योग्य निष्कर्षों में विभाजित करता है।"
+        analysis_dict["problem_statement"] = "मौजूदा साहित्य में इस विषय पर व्यापक प्रयोगात्मक डेटा की कमी थी।"
+        analysis_dict["research_objective"] = f"{topic} का गहन जांच और विश्लेषण करना।"
+        
+        if "key_takeaways_simple" in analysis_dict and isinstance(analysis_dict["key_takeaways_simple"], list):
+            analysis_dict["key_takeaways_simple"] = [
+                f"• {topic} के मुख्य सिद्धांतों और आंकड़ों का विश्लेषण करता है।",
+                "• परिणामों को प्रभावित करने वाले प्रमुख कारकों की पहचान करता है।",
+                "• पेशेवरों के लिए व्यावहारिक सिफारिशें प्रदान करता है।",
+                "• भविष्य के अकादमिक अध्ययनों के लिए एक मजबूत आधार स्थापित करता है।"
+            ]
+
+    return analysis_dict
+
+def generate_paper_analysis(
+    title: str, 
+    text: str, 
+    abstract: str = "",
+    user_settings: Optional[Dict[str, Any]] = None
+) -> AIAnalysis:
     """
     Calls OpenAI to generate a universal, domain-aware, structured AIAnalysis of the research paper.
+    Incorporates authenticated user's Settings preferences (explanation_level, analysis_length, language).
     Adapts persona to paper's discipline (Medicine, Chemistry, Law, Engineering, Economics, etc.).
     Never assumes every paper is about AI/ML!
     """
     client = get_openai_client()
     domain_info = detect_domain_from_text(title, text or abstract)
-    
+
+    settings_dict = user_settings or {}
+    exp_level = str(settings_dict.get("explanation_level", "Standard")).strip()
+    ans_length = str(settings_dict.get("analysis_length", "Detailed")).strip()
+    lang = str(settings_dict.get("language", "English")).strip()
+
     if not client:
-        print(f"OpenAI API key missing. Generating domain-aware mock analysis for [{domain_info['research_domain']}]...")
+        print(f"OpenAI API key missing. Generating domain-aware mock analysis for [{domain_info['research_domain']}] with settings {settings_dict}...")
         mock_data = get_mock_analysis(title, abstract)
+        mock_data = apply_settings_to_analysis(mock_data, settings_dict)
         return AIAnalysis(**mock_data)
 
     words = text.split()
@@ -456,6 +535,20 @@ def generate_paper_analysis(title: str, text: str, abstract: str = "") -> AIAnal
     prompt = f"""
     You are an expert Professor, Peer Reviewer, and Academic Mentor in the field of: {domain_info['research_domain']}.
     Adopt the teaching persona of a: {domain_info['style_persona']}.
+
+    USER PREFERENCES (STRICTLY APPLY):
+    1. EXPLANATION LEVEL: {exp_level.upper()}
+       - If SIMPLE: Explain in plain, accessible language for a beginner. Replace jargon with clear explanations.
+       - If ADVANCED: Provide rigorous academic analysis with deep methodology, statistical methods, equations, assumptions.
+       - If STANDARD: Provide balanced college-level explanations.
+
+    2. ANALYSIS LENGTH: {ans_length.upper()}
+       - If SHORT: Focus concisely on research problem, method, key findings, core conclusion, and major limitations.
+       - If DETAILED: Provide a comprehensive breakdown across all sections.
+
+    3. TARGET LANGUAGE: {lang.upper()}
+       - If HINDI: Output all explanations and narrative text in fluent Hindi (Devanagari script), keeping technical terms clear.
+       - If ENGLISH: Output in English.
     
     CRITICAL MANDATORY INSTRUCTIONS:
     1. AUTOMATICALLY DETECT AND RESPECT THE PAPER'S ACTUAL DOMAIN:
@@ -466,40 +559,32 @@ def generate_paper_analysis(title: str, text: str, abstract: str = "") -> AIAnal
        - If Law, explain statutes, judicial reasoning, regulations, and cases.
        - If Agriculture, explain crops, soil, farming methods, and yields.
        - If Civil/Mechanical Engineering, explain structures, mechanics, materials, and forces.
-    
+     
     2. DO NOT ASSUME THE PAPER IS ABOUT AI, TRANSFORMERS, LLMs, RAG, OR MACHINE LEARNING unless the paper explicitly focuses on those topics!
-    
+     
     3. DO NOT INVENT FACTS, DATASETS, NUMBERS, OR EQUATIONS:
        If a field or detail is NOT present in the uploaded text (e.g. equations, neural architecture, dataset details), explicitly write:
        "This information is not provided in the paper."
-    
+     
     4. IF YOU CANNOT CONFIDENTLY IDENTIFY THE DOMAIN:
        Set "is_domain_confident": false, "research_domain": "Uncertain Domain", and state:
        "I couldn't confidently identify the research domain from the uploaded document."
-    
+     
     5. NATURAL PAPER EXPLANATION INSTRUCTIONS (VERY IMPORTANT):
        - DO NOT analyze the paper sentence-by-sentence.
        - DO NOT produce an "original sentence -> simplified sentence" format.
        - DO NOT paraphrase each paragraph individually.
        - Read relevant sections as a whole, synthesize ideas into a natural, coherent narrative following research logic.
-       - Populate "natural_narrative_sections" answering the 7 core questions:
-         * What is happening here?
-         * Why are the researchers doing this?
-         * What are they trying to establish?
-         * What evidence do they have?
-         * What does the result mean?
-         * Why does it matter?
-         * What should I be careful not to conclude?
-    
+     
     6. EMOJI RULE:
        - DO NOT USE ANY EMOJIS ANYWHERE IN THE JSON OUTPUT.
-    
+     
     Paper Title: {title}
     Abstract: {abstract}
-    
+     
     Paper Content Snippet:
     {truncated_text}
-    
+     
     Return a valid JSON object matching the schema below:
     {{
         "research_domain": "{domain_info['research_domain']}",
@@ -569,7 +654,7 @@ def generate_paper_analysis(title: str, text: str, abstract: str = "") -> AIAnal
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional research analysis bot that outputs ONLY valid JSON adhering strictly to the paper's actual discipline and text."},
+                {"role": "system", "content": "You are a professional research analysis bot that outputs ONLY valid JSON adhering strictly to the paper's actual discipline and user preferences."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
@@ -588,10 +673,12 @@ def generate_paper_analysis(title: str, text: str, abstract: str = "") -> AIAnal
                     cleaned_glossary.append({"term": term, "definition": definition})
             data["glossary"] = cleaned_glossary
 
+        data = apply_settings_to_analysis(data, settings_dict)
         return AIAnalysis(**data)
     except Exception as e:
         print(f"Error during OpenAI paper analysis generation: {e}. Falling back to domain-aware mock data.")
         mock_data = get_mock_analysis(title, abstract)
+        mock_data = apply_settings_to_analysis(mock_data, settings_dict)
         return AIAnalysis(**mock_data)
 
 def generate_chat_response(

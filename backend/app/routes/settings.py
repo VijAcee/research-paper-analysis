@@ -55,6 +55,10 @@ def update_user_settings(
     if settings_in.theme not in ["Light", "Dark", "System Default"]:
         raise HTTPException(status_code=400, detail="Theme must be Light, Dark, or System Default.")
 
+    # Validate language
+    if settings_in.language not in ["English", "Hindi"]:
+        raise HTTPException(status_code=400, detail="Language must be English or Hindi.")
+
     updated_settings = {
         "explanation_level": settings_in.explanation_level,
         "analysis_length": settings_in.analysis_length,
