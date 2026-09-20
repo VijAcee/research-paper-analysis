@@ -82,12 +82,20 @@ def chat_with_paper(
     # 2. Extract history for LLM prompt context
     history_messages = convo.get("messages", [])
     
+    # 2b. Extract user settings if available
+    user_settings = None
+    if current_user:
+        user_doc = db.users.find_one({"_id": ObjectId(current_user["id"])})
+        if user_doc and "settings" in user_doc:
+            user_settings = user_doc["settings"]
+
     # 3. Call RAG chat completion service
     ai_result = generate_chat_response(
         paper_id=paper_id,
         paper_title=paper["title"],
         history=history_messages,
-        user_message=body.message
+        user_message=body.message,
+        user_settings=user_settings
     )
     
     # 4. Construct message docs

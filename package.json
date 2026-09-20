@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "npm run dev --prefix frontend",
+    "dev": "node scripts/start_dev.js",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "python backend/keep_backend_alive.py",
     "build": "npm run build --prefix frontend",
     "start": "npm run start --prefix frontend",
     "lint": "npm run lint --prefix frontend"

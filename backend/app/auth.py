@@ -87,14 +87,19 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> dict:
         )
     
     db = get_db()
-    try:
-        user = db.users.find_one({"_id": ObjectId(user_id)})
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token identifier format",
-        )
-        
+    user = None
+    if ObjectId.is_valid(user_id):
+        try:
+            user = db.users.find_one({"_id": ObjectId(user_id)})
+        except Exception:
+            user = None
+
+    if user is None:
+        user = db.users.find_one({"_id": user_id})
+
+    if user is None and payload.get("email"):
+        user = db.users.find_one({"email": payload.get("email")})
+
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

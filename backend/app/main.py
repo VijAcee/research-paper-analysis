@@ -30,9 +30,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security Headers & XSS/NoSQL Middleware Protection
+# Security Headers & Request Logger Middleware
 @app.middleware("http")
-async def add_security_headers(request: Request, call_next):
+async def add_security_headers_and_logging(request: Request, call_next):
+    start_time = datetime.datetime.now()
+    if not request.url.path.endswith("/health"):
+        print(f"[{start_time.strftime('%H:%M:%S')}] [MONITOR] Request Received: {request.method} {request.url.path}")
+    
     response = await call_next(request)
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -55,11 +59,16 @@ app.include_router(settings_route.router, prefix="/api")
 def startup_checks():
     print("[CONFIG] PaperLens Backend Service Started.")
 
+@app.get("/health")
+def root_health_check():
+    """Root health endpoint returning status: ok."""
+    return {"status": "ok"}
+
 @app.get("/api/health")
-def health_check():
-    """Service status health check."""
+def api_health_check():
+    """API health endpoint returning status: ok."""
     return {
-        "status": "online",
+        "status": "ok",
         "timestamp": datetime.datetime.now().isoformat(),
         "environment": settings.ENVIRONMENT,
         "security": "JWT_AUTH_ISOLATED"

@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 
 class ComparisonRequest(BaseModel):
     paper_ids: List[str]
+    papers: Optional[List[Dict[str, Any]]] = None
 
 class ComparisonResponse(BaseModel):
     id: str
@@ -14,3 +15,4 @@ class ComparisonResponse(BaseModel):
     detailed_analysis: str  # Markdown generated analysis text
     conclusion: str
     created_at: datetime
+

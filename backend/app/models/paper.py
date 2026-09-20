@@ -78,16 +78,24 @@ class AIAnalysis(BaseModel):
     publisher: Optional[str] = Field(None, description="Publisher name")
     pages_count: Optional[int] = Field(None, description="Total pages")
     # Universal Domain & Subject Metadata
-    research_domain: str = Field("General Academic Discipline", description="Detected Academic Discipline (e.g. Medicine, Organic Chemistry, Law, Civil Engineering, Physics, Economics)")
-    subject_area: str = Field("General Study", description="Specific Subject Area (e.g. Oncology, Structural Mechanics, Monetary Policy, Genetics)")
+    research_domain: str = Field("Academic Research", description="Detected Academic Discipline (e.g. Medicine, Organic Chemistry, Law, Civil Engineering, Physics, Economics, Humanities)")
+    subject_area: str = Field("Specialized Field", description="Specific Subject Area (e.g. Oncology, Structural Mechanics, Monetary Policy, Genetics, Hermeneutics)")
     primary_topic: str = Field("", description="Primary topic of the paper")
     research_problem: str = Field("", description="Core research problem addressed")
-    type_of_research: str = Field("Empirical Study", description="Type of Research (Experimental, Clinical Trial, Survey, Theoretical, Case Study, Simulation, Review)")
+    type_of_research: str = Field("Empirical Research", description="Type of Research (Experimental, Clinical Trial, Survey, Theoretical, Case Study, Systematic Review, Humanities)")
+    paper_type: str = Field("Empirical Research", description="Specific Paper Type")
+    nature_of_evidence: str = Field("", description="Nature of evidence (e.g. Laboratory Assays, Proofs, Clinical Cohorts, Primary Sources)")
+    study_design: str = Field("", description="Study design (e.g. Randomized Trial, Observational Cohort, Theoretical Proof Framework)")
+    main_research_question: str = Field("", description="Main research question being addressed")
+    main_contribution: str = Field("", description="Main contribution of the paper")
+    adaptive_section_titles: Dict[str, str] = Field(default_factory=dict, description="Customized section title overrides based on paper type")
     domain_confidence: float = Field(0.95, description="Confidence score for domain detection (0.0 to 1.0)")
     domain_explanation_style: str = Field("Specialist Professor & Academic Mentor", description="Adapted teaching persona")
     is_domain_confident: bool = Field(True, description="Whether domain identification was confident")
+    is_low_confidence: bool = Field(False, description="Whether the paper analysis triggered a Quality Gate warning due to corrupted PDF text")
+    confidence_message: str = Field("", description="Quality Gate low-confidence warning message")
     
-    research_area: str = Field("General Research", description="Specific research area")
+    research_area: str = Field("Specialized Research", description="Specific research area")
     
     # Executive & Abstract Summaries
     executive_summary: str = Field(..., description="400-700 word comprehensive executive summary")
@@ -160,7 +168,21 @@ class AIAnalysis(BaseModel):
     must_know_points: List[str] = Field(default_factory=list, description="5-10 non-negotiable must-know points")
     remember_5_things: List[str] = Field(default_factory=list, description="5 essential ideas for exams, vivas, interviews, and presentations")
     categorized_questions: Dict[str, List[QuestionItem]] = Field(default_factory=dict, description="Basic, Methodology, Results, Critical thinking, Advanced questions")
-    final_takeaway: str = Field("", description="Central message on what the reader should actually believe/understand")
+    # Story Narrative & Internal Paper Model Fields
+    story_big_picture: str = Field("", description="The Big Picture: What is this paper about and what specific problem does it address?")
+    story_why_exists: str = Field("", description="Why This Research Exists: What motivated the study and real-world problem?")
+    story_missing_before: str = Field("", description="What Was Missing Before: Explicit research gap or limitation built upon.")
+    story_wanted_to_find_out: str = Field("", description="What the Researchers Wanted to Find Out: Exact research question or objective.")
+    story_what_they_did: str = Field("", description="What They Did: Connected description of actual methodology.")
+    story_what_they_found: str = Field("", description="What They Found: Important findings and evidence answering research question.")
+    story_why_it_matters: str = Field("", description="Why It Matters: Authentic contribution and who benefits.")
+    story_important_caveats: str = Field("", description="Important Caveats: Explicit author limitations and study design constraints.")
+    story_paper_in_one_paragraph: str = Field("", description="The Paper in One Paragraph: Grounded synthesis connecting problem, objective, method, findings, contribution, and limitations.")
+    
+    paper_topic: str = Field("", description="Internal paper model topic")
+    paper_type_model: str = Field("", description="Internal paper model paper type")
+    data_or_evidence: str = Field("", description="Internal paper model data or evidence")
+    implications: str = Field("", description="Internal paper model practical/theoretical implications")
 
 class PaperMetadata(BaseModel):
     title: str
